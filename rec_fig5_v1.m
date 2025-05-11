@@ -302,12 +302,15 @@ end
 phi_v = sigma_v^2 * eye(M); % for now - change later
 %% bemforming 
 % creating steering vector using far field approximation
-freqs = (0:window_length-1) *fs / window_length;
 sv = zeros(M ,window_length);
 for k=1:window_length
     freq = ((k-1)/window_length - 0.5) * fs;
-    sv(:, k) = steering_vector(M, doa, freqs(k), c, relative_pos_a);
+    sv(:, k) = steering_vector(M, doa, freq, c, relative_pos_a);
 end
+
+% for m=1:M
+%     sv(m, :) = ha_f(m, :) ./ ha_f(1, :);
+% end
 
 % creating MVDR beamformer
 h_mvdr = cell(size(x_f, 2), 1);
@@ -397,23 +400,13 @@ end
 function a = steering_vector(M, doa, freq, c, rel_pos)
     phi_rad = deg2rad(doa(1));
     theta_rad = deg2rad(doa(2));
-    d_hat = [cos(theta_rad)*cos(phi_rad); cos(theta_rad)*sin(phi_rad); sin(theta_rad)];
+    d_hat = [cos(theta_rad)*cos(phi_rad); 
+        cos(theta_rad)*sin(phi_rad); 
+        sin(theta_rad)];
     lambda = c / freq;
     k = 2 * pi / lambda;
-    % phi = linspace(0, 2*pi, M+1);
-    % phi(end) = [];
-    %rel_pos = d(2:M);
-    phase_delay = k * (rel_pos(2:M, :) * d_hat);
+    phase_delay = k * (rel_pos(2:end, :) * d_hat);
     a = ones(M, 1);
-    a(2:M) = exp(-1j*phase_delay);
+    a(2:end) = exp(-1j*phase_delay);
 end
 
-% function a = steering_vector(M, r, theta, freq, c)
-%     theta_rad = deg2rad(theta);
-%     lambda = c / freq;
-%     k = 2 * pi / lambda;
-%     phi = linspace(0, 2*pi, M+1);
-%     phi(end) = [];
-% 
-%     a = exp(-1j*k*r*cos(theta_rad - phi));
-% end
