@@ -1,16 +1,17 @@
-close all; clc; clear all;
-% with double talk, only using AEC  
+close all; clc; clear all; 
 %% parameters
 fs = 16e3; %[Hz]
 c = 340; %[m/s]
 M = 4; % number of microphones
 B = 19; % number of partitions of AETF
 P = 4; % number of partitions of RETF
+rho = B / P; % overestimation factor 
 R = 128;
 B_nc = 3;
 mu = 0.1; %parameter for AETF gradient decsent 
 eta = 0.09; %parameter for RETF gradient decsent
-beta = exp(-R/(0.075*fs)); % forgetting factor 
+beta = exp(-R/(0.075*fs)); % forgetting factor
+alpha = exp(-R/(0.04*fs)); % forgetting factor for residual echo
 
 epsilon = 1e-3; % reg for AEC
 
@@ -24,7 +25,7 @@ sigma_v = sqrt(0.5*0.00005); % thermal noise
 sig_time = 24; % sec
 %% loading RIR's
 load("C:\Users\anat\OneDrive - Technion\Notability\Project\first research simulation\RIRs.mat", ...
-    "g_a", "g_b", "h_a", "h_b", "doa", "array_radius");
+    "g_a", "g_b", "h_a", "h_b", "doa", "array_radius", "relative_pos_a");
 %% creating input signals
 x = sigma_loudspeaker * randn(1, sig_time*fs); % loudspeaker signal 
 no_echo_indices = [(500*R+1):1:(750*R+1); 
@@ -63,28 +64,6 @@ plot(y_t(1, :))
 x_f = stft(x, fs, "Window", window_type, "OverlapLength", overlap, ...
    "FFTLength", window_length);
 x_f_vec = create_vec(x_f, B);
-% for k=1:window_length
-%     for l=1:size(x_f,2)
-%         vec = zeros(B, 1);
-%         for b=0:B-1
-%             if l-b >= 1
-%                 vec(b+1) = x_f(k, l-b);
-%             end
-%         end
-%         x_f_vec{k, l} = vec;
-%     end
-% end
-% [num_bins, num_frames] = size(x_f);
-% is_correct = 1;
-% 
-% for k = 1:num_bins
-%     for l = 1:num_frames
-%         if x_f_vec{k, l}(1) ~= x_f(k, l)
-%             is_correct = 0;
-%             fprintf('Mismatch at k=%d, l=%d\n', k, l);
-%         end
-%     end
-% end
 
 talker_sig_f = stft(talker_sig, fs, "Window", window_type, "OverlapLength", overlap, ...
    "FFTLength", window_length);
@@ -128,7 +107,6 @@ h1_est = cell(size(x_f));
 d_est_f = cell(1, M);
 for k=1:window_length
     h1_est{k, 1} = zeros(B, 1);
-    %psi_last = zeros(B, B);
     psi_last = M*eye(B);
     for n=2:size(x_f, 2)
         [step, psi_last] = calc_step_mat(beta, x_f_vec{k, n-1}, psi_last, mu, B, epsilon);
@@ -143,41 +121,13 @@ for k=1:window_length
     end
 end
 
-% is_correct = 1;
-% if d_est_f{1}~=d_est_f1_test
-%     is_correct = 0
-% end
-
 d1_est_f_vec = create_vec(d_est_f{1}, P);
-% for k=1:window_length
-%     for l=1:size(x_f,2)
-%         vec = zeros(P, 1);
-%         for p=0:P-1
-%             if l-p >= 1
-%                 vec(p+1) = d_est_f{1}(k, l-p);
-%             end
-%         end
-%         d1_est_f_vec{k, l} = vec;
-%     end
-% end
-% 
-% [num_bins, num_frames] = size(x_f);
-% is_correct = 1;
-% for k = 1:num_bins
-%     for l = 1:num_frames
-%         if d1_est_f_vec{k, l}(1) ~= d_est_f{1}(k, l)
-%             is_correct = 0;
-%             fprintf('Mismatch at k=%d, l=%d\n', k, l);
-%         end
-%     end
-% end
+
 %% estimating RETF
-%step_size = 1e-4;
 a_est = cell(size(x_f));
 for m=2:M
     for k=1:window_length
         a_est{k, 1} = zeros(P, 1);
-        %psi_prev_retf = zeros(P, P);
         psi_prev_retf = M*eye(P);
         for n=2:size(x_f, 2)
             [step_retf, psi_prev_retf] = calc_step_mat_retf(beta, d1_est_f_vec{k, n-1}, psi_prev_retf, eta, P, epsilon);
@@ -200,14 +150,7 @@ for m=1:M
     e_f{m} = y_f{m} - d_est_f{m};
     u_f{m} = d_f{m} - d_est_f{m};
 end
-% for k=1:window_length
-%     for n=1:size(x_f, 2)
-%         if abs(e_f{3}(k ,n)) > 1e3
-%             freq = k
-%             num = n
-%         end
-%     end
-% end
+
 e_t = zeros(size(y_t));
 u_t = zeros(size(y_t));
 for m=1:M
@@ -216,10 +159,7 @@ for m=1:M
     u_t(m, :) = istft(u_f{m}, fs, "Window", window_type, "OverlapLength", overlap, ...
    "FFTLength", window_length);
 end
-%e1_t = istft(e_f{1}, fs, "Window", window_type, "OverlapLength", overlap, ...
-%   "FFTLength", window_length);
-%e2_t = istft(e_f{3}, fs, "Window", window_type, "OverlapLength", overlap, ...
-%   "FFTLength", window_length);
+
 figure;
 subplot(211)
 plot(e_t(3, :))
@@ -283,9 +223,132 @@ hold on;
 plot(u2_plot);
 legend("y_2(lR)", "e_2(lR)", "u_2(lR)");
 hold off;
-%% testin create_vec funtion
-x_test = 1:1:10;
-x_test_vec = create_vec(x_test, 3);
+
+%% residual echo estimation
+% refrence mic - using AETF
+delta_h1 = cell(size(x_f));
+u_hat = cell(1, M);
+u_hat{1} = zeros(size(x_f));
+for k=1:window_length
+    delta_h1{k, 1} = zeros(B, 1);
+    psi_last = M*eye(B);
+    cross_psi = zeros(B, 1); % check this 
+    for n=1:size(x_f, 2)
+        [~, psi_last] = calc_step_mat(beta, x_f_vec{k, n}, psi_last, mu, B, epsilon);
+        psi_last_reg = epsilon*eye(size(psi_last)) + psi_last;
+        cross_psi = beta*cross_psi + (1-beta)*x_f_vec{k, n}*e_f{1}(k, n);
+        delta_h1{k ,n} = (psi_last_reg \ eye(size(psi_last_reg)))*cross_psi;
+
+        u_hat{1}(k, n) = delta_h1{k, n}'*x_f_vec{k, n};
+    end
+end
+
+% plotting estimated u1
+u1_hat_t = istft(u_hat{1}, fs, "Window", window_type, "OverlapLength", overlap, ...
+   "FFTLength", window_length);
+figure;
+plot(real(u1_hat_t))
+hold on
+plot(u_t(1, :))
+legend('$\hat{u}_1$', "$u_1$", 'Interpreter', 'latex');
+
+% rest mics - using RETF
+for m=2:M
+    delta_am = cell(size(d_est_f{1}));
+    u_hat{m} = zeros(size(d_est_f{1}));
+    for k=1:window_length
+        delta_h1{k, 1} = zeros(P, 1);
+        psi_last = M*eye(P);
+        cross_psi = zeros(P, 1); % check this 
+        for n=1:size(x_f, 2)
+            [~, psi_last] = calc_step_mat_retf(beta, d1_est_f_vec{k, n}, psi_last, eta, P, epsilon);
+            psi_last_reg = epsilon*eye(size(psi_last)) + psi_last;
+            cross_psi = beta*cross_psi + (1-beta)*d1_est_f_vec{k, n}*e_f{m}(k, n);
+            delta_am{k ,n} = (B/P)*(psi_last_reg \ eye(size(psi_last_reg)))*cross_psi;
+    
+            u_hat{m}(k, n) = delta_am{k, n}'*d1_est_f_vec{k, n};
+        end
+    end
+end
+
+% plotting estimated u2
+u2_hat_t = istft(u_hat{2}, fs, "Window", window_type, "OverlapLength", overlap, ...
+   "FFTLength", window_length);
+figure;
+plot(real(u2_hat_t))
+hold on
+plot(u_t(2, :))
+legend('$\hat{u}_2$', "$u_2$", 'Interpreter', 'latex');
+
+%% estimating residual echo covariance matrix
+u_hat_vec = cell(size(x_f));
+for k=1:window_length
+    for n=1:size(x_f, 2)
+        u_hat_vec{k, n} = zeros(M, 1);
+        for m=1:M
+            u_hat_vec{k, n}(m) = u_hat{m}(k, n);
+        end
+    end
+end
+
+phi_u_hat = cell(size(x_f));
+for k=1:window_length
+    phi_u_hat{k, 1} = eye(M);
+    for n=2:size(x_f, 2)
+        phi_u_hat{k, n} = alpha*phi_u_hat{k, n-1} + (1-alpha)*u_hat_vec{k, n}*u_hat_vec{k, n}';
+    end
+end
+
+phi_v = sigma_v^2 * eye(M); % for now - change later
+%% bemforming 
+% creating steering vector using far field approximation
+freqs = (0:window_length-1) *fs / window_length;
+sv = zeros(M ,window_length);
+for k=1:window_length
+    freq = ((k-1)/window_length - 0.5) * fs;
+    sv(:, k) = steering_vector(M, doa, freqs(k), c, relative_pos_a);
+end
+
+% creating MVDR beamformer
+h_mvdr = cell(size(x_f, 2), 1);
+for f_idx=1:window_length
+    for n=1:size(x_f, 2)
+        phi_total = phi_v + phi_u_hat{f_idx, n};
+        phi_total_inv = phi_total \ eye(size(phi_total));
+        denominator = sv(:, f_idx)' * phi_total_inv * sv(:, f_idx);
+        numerator = phi_total_inv * sv(:, f_idx);
+        h_mvdr{n}(:, f_idx) = numerator / denominator;
+    end
+end
+
+% creating input format for beamformer
+e_f_vec = cell(size(e_f{1}, 2), 1);
+u_f_vec = cell(size(u_f{1}, 2), 1);
+for l=1:size(e_f{1}, 2)
+    e_f_vec{l} = zeros(M, window_length);
+    u_f_vec{l} = zeros(M, window_length);
+    for m=1:M
+        e_f_vec{l}(m ,:) = e_f{m}(:, l);
+        u_f_vec{l}(m ,:) = u_f{m}(:, l);
+    end
+end
+
+% applying beamformer
+output_f = zeros(size(e_f{1}));
+residual_echo_f = zeros(size(u_f{1}));
+for l=1:size(e_f{1}, 2)
+    tmp_mat = h_mvdr{l}' * e_f_vec{l};
+    output_f(:, l) = diag(tmp_mat);
+
+    tmp_mat = h_mvdr{l}' * u_f_vec{l};
+    residual_echo_f(:, l) = diag(tmp_mat);
+end
+%% plotting
+output = istft(output_f, fs, "Window", window_type, "OverlapLength", overlap, ...
+   "FFTLength", window_length);
+
+figure;
+plot(real(output))
 
 %% functions 
 % funtion to create signal vec for convolution
@@ -330,3 +393,27 @@ function [M, psi] = calc_step_mat_retf(beta, d, psi_prev, eta, p, epsilon)
 
     M = (eta / p) * (psi_reg \ eye(size(psi)));
 end
+
+function a = steering_vector(M, doa, freq, c, rel_pos)
+    phi_rad = deg2rad(doa(1));
+    theta_rad = deg2rad(doa(2));
+    d_hat = [cos(theta_rad)*cos(phi_rad); cos(theta_rad)*sin(phi_rad); sin(theta_rad)];
+    lambda = c / freq;
+    k = 2 * pi / lambda;
+    % phi = linspace(0, 2*pi, M+1);
+    % phi(end) = [];
+    %rel_pos = d(2:M);
+    phase_delay = k * (rel_pos(2:M, :) * d_hat);
+    a = ones(M, 1);
+    a(2:M) = exp(-1j*phase_delay);
+end
+
+% function a = steering_vector(M, r, theta, freq, c)
+%     theta_rad = deg2rad(theta);
+%     lambda = c / freq;
+%     k = 2 * pi / lambda;
+%     phi = linspace(0, 2*pi, M+1);
+%     phi(end) = [];
+% 
+%     a = exp(-1j*k*r*cos(theta_rad - phi));
+% end
