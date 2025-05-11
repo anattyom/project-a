@@ -33,18 +33,14 @@ no_echo_indices = [(500*R+1):1:(750*R+1);
 %x(no_echo_indices(1, :)) = 0;
 x(no_echo_indices(2, :)) = 0;
 v_t = sigma_v * randn(M, length(x));
-%talker_sig = 100 * sigma_loudspeaker * sin(2*pi*2*(0:1/fs:sig_time-1/fs));
-talker_sig = 5 * sigma_loudspeaker * randn(1, sig_time*fs);
+%talker_sig = 5 * sigma_loudspeaker * randn(1, sig_time*fs);
+[audio, f_audio] = audioread('cropped_audio.mp3');
+%audio = audio_full(1:sig_time*f_audio);
+audio_resample = resample(audio, fs, f_audio);
+talker_sig = zeros(sig_time*fs, 1);
+talker_sig(1:length(audio_resample)) = audio_resample;
 talker_sig(1:750*R+1) = 0;
-talker_sig(1200*R+1:end) = 0;
-% no_talker_indices = 1:1:(600*R+1);
-% talker_sig(no_talker_indices) = 0;
-% no_talker_indices = 1200*R+1 : 1 : 1500*R+1;
-% talker_sig(no_talker_indices) = 0;
-% no_talker_indices = 1800*R+1 : 1 : 2200*R+1;
-% talker_sig(no_talker_indices) = 0;
-% talker_sig(2400*R+1 : end) = 0;
-%talker_sig = 10 * sigma_loudspeaker * randn(1, sig_time*fs);
+talker_sig(1200*R+1:1600*R+1) = 0;
 
 d_t = zeros(M, length(x));
 s_t = zeros(M, length(x));
@@ -374,6 +370,9 @@ hold on;
 plot(real(residual_echo_plot));
 legend("$e_1(lR)$", "$\hat{s}_1(lR)$", "$\bar{u}(lR)$", 'Interpreter', 'latex');
 hold off;
+
+%% saving audio
+audiowrite('output.wav', real(output), fs);
 
 %% functions 
 % funtion to create signal vec for convolution
