@@ -185,26 +185,34 @@ end
 figure;
 subplot(221)
 plot(erle(1, :));
-ylim([-30, 40]);
+%ylim([-30, 40]);
 xlim([1, 1500]);
+xlabel("$lR$", 'Interpreter', 'latex');
+ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
 legend("n=1", Location="northwest");
 subplot(222)
 plot(erle(2, :));
-ylim([-30, 40]);
+%ylim([-30, 40]);
 xlim([1, 1500]);
+xlabel("$lR$", 'Interpreter', 'latex');
+ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
 legend("n=2", Location="northwest");
 subplot(223)
 plot(erle(3, :));
-ylim([-30, 40]);
+%ylim([-30, 40]);
 xlim([1, 1500]);
+xlabel("$lR$", 'Interpreter', 'latex');
+ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
 legend("n=3", Location="northwest");
 subplot(224)
 plot(erle(4, :));
-ylim([-30, 40]);
+%ylim([-30, 40]);
 xlim([1, 1500]);
+xlabel("$lR$", 'Interpreter', 'latex');
+ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
 legend("n=4", Location="northwest");
 
@@ -216,12 +224,13 @@ e2_plot = e_t(2, indices);
 u2_plot = u_t(2, indices);
 figure;
 plot(y2_plot);
-ylim([-1, 1]);
+%ylim([-1, 1]);
+xlabel("$lR$", 'Interpreter', 'latex');
 hold on;
 plot(e2_plot);
 hold on;
 plot(u2_plot);
-legend("y_2(lR)", "e_2(lR)", "u_2(lR)");
+legend("$y_2(lR)$", "$e_2(lR)$", "$u_2(lR)$", 'Interpreter', 'latex');
 hold off;
 
 %% residual echo estimation
@@ -346,12 +355,25 @@ for l=1:size(e_f{1}, 2)
     tmp_mat = h_mvdr{l}' * u_f_vec{l};
     residual_echo_f(:, l) = diag(tmp_mat);
 end
-%% plotting
+%% plotting fig 10
 output = istft(output_f, fs, "Window", window_type, "OverlapLength", overlap, ...
    "FFTLength", window_length);
+residual_echo = istft(residual_echo_f, fs, "Window", window_type, "OverlapLength", overlap, ...
+   "FFTLength", window_length);
 
+e1_plot = e_t(1, indices);
+s1_hat_plot = output(indices);
+residual_echo_plot = residual_echo(indices);
 figure;
-plot(real(output))
+plot(real(e1_plot));
+xlim([0, 3000]);
+xlabel("$lR$", 'Interpreter', 'latex');
+hold on;
+plot(real(s1_hat_plot));
+hold on;
+plot(real(residual_echo_plot));
+legend("$e_1(lR)$", "$\hat{s}_1(lR)$", "$\bar{u}(lR)$", 'Interpreter', 'latex');
+hold off;
 
 %% functions 
 % funtion to create signal vec for convolution
