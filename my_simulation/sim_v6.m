@@ -5,14 +5,22 @@ close all; clc; clear all;
 fs = 16e3; %[Hz]
 c = 340; %[m/s]
 M = 4; % number of microphones
+B = 1; % number of partitions for AETF
+P = 4; % number of partitions for RETF
+R = 128;
+B_nc = 3;
+mu = 0.1; % parameter for AETF gradient descent 
+beta = exp(-R / (0.075*fs)); % forgetting factor 
+epsilon = 1e-3; % reg for AEC 
 
 window_length = 512;
 overlap = 0.75*window_length; % 75% overlap in stft
 window_type = hamming(window_length);
 
-B_nc = 3; % taken from paper - check
-R = 128; 
+sigma_loudspeaker = sqrt(0.5*0.05);
+sigma_v = sqrt(0.5*0.00005); % thermal noise
 
+sig_time = 24; % sec
 %% loading RIR's
 load("C:\Users\anat\OneDrive - Technion\Notability\Project\first research simulation\RIRs.mat", ...
     "g_a", "g_b", "h_a", "h_b", "doa", "array_radius", "relative_pos_a");
@@ -20,14 +28,12 @@ load("C:\Users\anat\OneDrive - Technion\Notability\Project\first research simula
 %% estimating noise covariance matix 
 estimation_length = 15; %[sec] - estimating the noise covariance matrix for both the mic and the background noise
 
-sigma_loudspeaker = sqrt(0.5*0.05);
 x_loudspeaker = sigma_loudspeaker * randn(1, estimation_length*fs); % for estimation loudpeaker signal is WGN
 dt_calib = zeros(M, estimation_length*fs); % signal recived at each mic
 for m=1:M
     dt_calib(m, :) = filter(h_a(m, :), 1, x_loudspeaker);
 end
-
-sigma_v = sqrt(0.5*0.00005); % thermal noise 
+ 
 vt = sigma_v * randn(M, length(dt_calib(1, :)));
 
 yt_est = dt_calib + vt; %input signal at each mic
@@ -47,45 +53,26 @@ for k=1:window_length
 end
 
 %% estimating the REFT's 
-
-a_hat = ones(M, window_length);
+y1_est_mat = create_mat(yf_est{1}, P);
+a_hat = cell(M, window_length);
 for m=2:M
+    %ym_est = create_vec(yf_est{m}, P);
     for k=1:window_length
-        a_hat(m,k) = lsqr(yf_est{1}(k, :).', yf_est{m}(k, :).');
+        a_hat{m,k} = lsqr(y1_est_mat{k}, yf_est{m}(k, :).');
+        a_hat{m, k} = conj(a_hat{m, k});
     end
 end
 
 % real time stage 
 %% creating input signals
-sig_time = 20; % sec
-
-% x = sigma_loudspeaker * randn(1, sig_time*fs); % loudspeaker signal 
-% v_t = sigma_v * randn(M, length(x));
-% 
-% %creating input signal 
-% song_filename = 'audio.mp3';
-% [~, fs_audio] = audioread(song_filename);
-% start_time = 60; % [sec]
-% end_time = start_time + sig_time; % [sec]
-% start_sample = round(start_time * fs_audio);
-% end_sample = round(end_time * fs_audio);
-% [audio_data, ~] = audioread(song_filename, [start_sample, end_sample]);
-% tmp = audio_data(:, 1);
-% talker_sig_tmp = resample(tmp, fs, fs_audio);
-% talker_sig = 5 * talker_sig_tmp(2:end).';
-% audiowrite('cropped_audio.mp3', talker_sig, fs);
 x = sigma_loudspeaker * randn(1, sig_time*fs); % loudspeaker signal 
 no_echo_indices = [(500*R+1):1:(750*R+1); 
     (2200*R+1):1:(2450*R+1)];
 %x(no_echo_indices(1, :)) = 0;
 x(no_echo_indices(2, :)) = 0;
 v_t = sigma_v * randn(M, length(x));
-%talker_sig = 100 * sigma_loudspeaker * sin(2*pi*2*(0:1/fs:sig_time-1/fs));
-% talker_sig = 5 * sigma_loudspeaker * randn(1, sig_time*fs);
-% talker_sig(1:750*R+1) = 0;
-% talker_sig(1200*R+1:end) = 0;
+
 [audio, f_audio] = audioread('cropped_audio.mp3');
-%audio = audio_full(1:sig_time*f_audio);
 audio_resample = resample(audio, fs, f_audio);
 talker_sig_full = zeros(sig_time*fs, 1);
 talker_sig_full(1:length(audio_resample)) = audio_resample;
@@ -176,10 +163,13 @@ e_f = cell(M, 1);
 u_f = cell(M, 1);
 e_f{1} = y_f{1} - d1_est;
 u_f{1} = d_f{1} - d1_est;
+d1_est_vec = create_vec(d1_est, P);
 for m=2:M
     dm_est = zeros(size(d1_est));
     for n=1:size(d1_est, 2)
-        dm_est(:, n) = a_hat(m, :)' .* d1_est(:, n);
+        for k=1:window_length
+            dm_est(k, n) = a_hat{m, k}' * d1_est_vec{k, n};
+        end
     end
     e_f{m} = y_f{m} - dm_est;
     u_f{m} = d_f{m} - dm_est;
@@ -211,38 +201,6 @@ plot(u2_plot);
 legend("$y_2(lR)$", "$e_2(lR)$", "$u_2(lR)$", 'Interpreter', 'latex');
 hold off;
 %% calculating erle after AEC
-% %LPF_length = round(length(d_t(1, :))*0.0015);
-% LPF_length = 150;
-% avg_filter = (1 / LPF_length) * ones(1, LPF_length);
-% erle = zeros(size(d_t));
-% for m=1:M
-%     d_t_lpf = filter(avg_filter, 1, d_t(m, :).^2);
-%     u_t_lpf = filter(avg_filter, 1, u_t(m, :).^2);
-%     erle(m, :) = d_t_lpf ./ u_t_lpf;
-% end
-% 
-% figure;
-% subplot(411);
-% plot(10 *log10(abs(erle(1, :))));
-% title("erle mic 1");
-% xlabel("l");
-% ylabel("ERLE [dB]");
-% subplot(412);
-% plot(10*log10(abs(erle(2, :))));
-% title("erle mic 2");
-% xlabel("l");
-% ylabel("ERLE [dB]");
-% subplot(413);
-% plot(10*log10(abs(erle(3, :))));
-% title("erle mic 3");
-% xlabel("l");
-% ylabel("ERLE [dB]");
-% subplot(414);
-% plot(10*log10(abs(erle(4, :))));
-% title("erle mic 4");
-% xlabel("l");
-% ylabel("ERLE [dB]");
-
 erle = zeros(M, length(u_t(1, :)) - R);
 for l=0:length(erle(1, :))/R-1
     for m=1:M
@@ -286,7 +244,7 @@ legend("n=4", Location="northwest");
 %% using MVDR beamformer
 h_mvdr = zeros(M, window_length);
 
-% ncreating steering vector 
+% creating steering vector 
 sv = zeros(M, window_length);
 for f_idx = 1:window_length
     freq = ((f_idx-1)/window_length - 0.5) * fs;
@@ -403,6 +361,14 @@ hold off;
 %% saving audio
 audiowrite('output.wav', real(output), fs);
 
+%%
+test = [1 2 3 4 5 6 7 8 9 10];
+test_vec = create_vec(test, 3);
+test_mat = create_mat(test, 3);
+for i=1:size(test_vec, 2)
+    test_vec{i}
+end
+test_mat{1}
 %% functions 
 function phi = est_cov_mat(x, window_length, M)    
     % creating cell for each frequency of X
@@ -422,6 +388,33 @@ function phi = est_cov_mat(x, window_length, M)
     end
 end
 
+% function for creating vector for convolution
+function x_vec = create_vec(x, vec_len)
+    x_vec = cell(size(x));
+    for k=1:size(x, 1)
+        for l=1:size(x,2)
+            vec = zeros(vec_len, 1);
+            for b=0:vec_len-1
+                if l-b >= 1
+                    vec(b+1) = x(k, l-b);
+                end
+            end
+            x_vec{k, l} = vec;
+        end
+    end
+end
+
+function x_mat = create_mat(x, vec_len)
+    x_mat = cell(1, size(x, 1));
+    x_vec = create_vec(x, vec_len);
+    for k=1:size(x, 1)
+        x_mat{k} = zeros(size(x, 2), vec_len);
+        for l=1:size(x, 2)
+            x_mat{k}(l, :) = x_vec{k, l};
+        end
+    end
+end
+
 % input: y1 - the last frame input at mic 1
 %        x - the last frame loudspeaker signal
 %        h - the last estimation for the AETF
@@ -432,16 +425,6 @@ function h_next = grad_descent_step(y1, x, h)
     % calculating next step
     h_next = h + step*x*conj(E);
 end
-
-% function a = steering_vector(M, r, theta, freq, c)
-%     theta_rad = deg2rad(theta);
-%     lambda = c / freq;
-%     k = 2 * pi / lambda;
-%     phi = linspace(0, 2*pi, M+1);
-%     phi(end) = [];
-% 
-%     a = exp(-1j*k*r*cos(theta_rad - phi));
-% end
 
 function a = steering_vector(M, doa, freq, c, rel_pos)
     phi_rad = deg2rad(doa(1));
