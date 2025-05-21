@@ -31,7 +31,7 @@ x = sigma_loudspeaker * randn(1, sig_time*fs); % loudspeaker signal
 no_echo_indices = [(500*R+1):1:(750*R+1); 
     (2200*R+1):1:(2450*R+1)];
 %x(no_echo_indices(1, :)) = 0;
-x(no_echo_indices(2, :)) = 0;
+%x(no_echo_indices(2, :)) = 0;
 v_t = sigma_v * randn(M, length(x));
 %talker_sig = 5 * sigma_loudspeaker * randn(1, sig_time*fs);
 [audio, f_audio] = audioread('cropped_audio.mp3');
@@ -41,13 +41,19 @@ talker_sig = zeros(sig_time*fs, 1);
 talker_sig(1:length(audio_resample)) = audio_resample;
 talker_sig(1:750*R+1) = 0;
 talker_sig(1200*R+1:1600*R+1) = 0;
+talker_sig = talker_sig.';
 
 d_t = zeros(M, length(x));
 s_t = zeros(M, length(x));
 y_t = zeros(M, length(x));
 for m=1:M
-    d_t(m, :) = filter(h_a(m, :), 1, x);
-    s_t(m, :) = filter(g_a(m, :), 1, talker_sig); 
+    % d_t(m, :) = filter(h_a(m, :), 1, x);
+    % s_t(m, :) = filter(g_a(m, :), 1, talker_sig); 
+    % y_t(m, :) = v_t(m, :) + d_t(m, :) + s_t(m, :);
+    d_t(m, :) = [filter(h_a(m, :), 1, x(1:round(length(x)/2))), ...
+        filter(h_b(m, :), 1, x(round(length(x))/2+1:end))];
+    s_t(m, :) = [filter(g_a(m, :), 1, talker_sig(1:round(length(talker_sig)/2))),...
+        filter(g_b(m, :), 1, talker_sig(round(length(talker_sig)/2)+1:end))]; 
     y_t(m, :) = v_t(m, :) + d_t(m, :) + s_t(m, :);
 end
 
@@ -167,8 +173,8 @@ title("e1")
 ylim([-0.5, 0.5])
 
 %% calculating erle
-erle = zeros(M, length(u_t(1, :)) - R);
-for l=0:length(erle(1, :))/R-1
+erle = zeros(M, length(u_t(1, :))/R);
+for l=0:length(erle(1, :))-1
     for m=1:M
         d_vec = d_t(m, (l*R+1):(R*l+R));
         u_vec = u_t(m, (l*R+1):(R*l+R));
@@ -182,7 +188,7 @@ figure;
 subplot(221)
 plot(erle(1, :));
 %ylim([-30, 40]);
-xlim([1, 1500]);
+%xlim([1, 1500]);
 xlabel("$lR$", 'Interpreter', 'latex');
 ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
@@ -190,7 +196,7 @@ legend("n=1", Location="northwest");
 subplot(222)
 plot(erle(2, :));
 %ylim([-30, 40]);
-xlim([1, 1500]);
+%xlim([1, 1500]);
 xlabel("$lR$", 'Interpreter', 'latex');
 ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
@@ -198,7 +204,7 @@ legend("n=2", Location="northwest");
 subplot(223)
 plot(erle(3, :));
 %ylim([-30, 40]);
-xlim([1, 1500]);
+%xlim([1, 1500]);
 xlabel("$lR$", 'Interpreter', 'latex');
 ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
@@ -206,7 +212,7 @@ legend("n=3", Location="northwest");
 subplot(224)
 plot(erle(4, :));
 %ylim([-30, 40]);
-xlim([1, 1500]);
+%xlim([1, 1500]);
 xlabel("$lR$", 'Interpreter', 'latex');
 ylabel("$erle [dB]$", 'Interpreter', 'latex');
 grid on;
