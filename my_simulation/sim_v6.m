@@ -5,8 +5,8 @@ close all; clc; clear all;
 fs = 16e3; %[Hz]
 c = 340; %[m/s]
 M = 4; % number of microphones
-B = 1; % number of partitions for AETF
-P = 4; % number of partitions for RETF
+B = 19; % number of partitions for AETF
+P = 1; % number of partitions for RETF
 R = 128;
 B_nc = 3;
 mu = 0.1; % parameter for AETF gradient descent 
@@ -26,7 +26,7 @@ load("C:\Users\anat\OneDrive - Technion\Notability\Project\first research simula
     "g_a", "g_b", "h_a", "h_b", "doa", "array_radius", "relative_pos_a");
 % calibration stage 
 %% estimating noise covariance matix 
-estimation_length = 15; %[sec] - estimating the noise covariance matrix for both the mic and the background noise
+estimation_length = 2; %[sec] - estimating the noise covariance matrix for both the mic and the background noise
 
 x_loudspeaker = sigma_loudspeaker * randn(1, estimation_length*fs); % for estimation loudpeaker signal is WGN
 dt_calib = zeros(M, estimation_length*fs); % signal recived at each mic
@@ -53,23 +53,32 @@ for k=1:window_length
 end
 
 %% estimating the REFT's 
-y1_est_mat = create_mat(yf_est{1}, P);
+% y1_est_mat = create_mat(yf_est{1}, P);
+% a_hat = cell(M, window_length);
+% for m=2:M
+%     %ym_est = create_vec(yf_est{m}, P);
+%     for k=1:window_length
+%         a_hat{m,k} = lsqr(y1_est_mat{k}, yf_est{m}(k, :).');
+%         a_hat{m, k} = conj(a_hat{m, k});
+%     end
+% end
+
 a_hat = cell(M, window_length);
-for m=2:M
-    %ym_est = create_vec(yf_est{m}, P);
-    for k=1:window_length
-        a_hat{m,k} = lsqr(y1_est_mat{k}, yf_est{m}(k, :).');
-        a_hat{m, k} = conj(a_hat{m, k});
+n_tf = size(yf_est{1}, 2);
+for k=1:window_length
+    denom = (1/n_tf) * conj(yf_est{1}(k, :)) * yf_est{1}(k, :).'; 
+    for m=1:M
+        cross =  (1/n_tf) * conj(yf_est{1}(k, :)) * yf_est{m}(k, :).';
+        a_hat{m, k} = cross / denom;
     end
 end
-
 % real time stage 
 %% creating input signals
 x = sigma_loudspeaker * randn(1, sig_time*fs); % loudspeaker signal 
 no_echo_indices = [(500*R+1):1:(750*R+1); 
     (2200*R+1):1:(2450*R+1)];
 %x(no_echo_indices(1, :)) = 0;
-x(no_echo_indices(2, :)) = 0;
+%x(no_echo_indices(2, :)) = 0;
 v_t = sigma_v * randn(M, length(x));
 
 [audio, f_audio] = audioread('cropped_audio.mp3');
@@ -79,6 +88,8 @@ talker_sig_full(1:length(audio_resample)) = audio_resample;
 talker_sig_full(1:750*R+1) = 0;
 talker_sig_full(1200*R+1:1600*R+1) = 0;
 talker_sig = talker_sig_full(1:length(x)).';
+
+%talker_sig = zeros(size(x));
 
 d_t = zeros(M, length(x));
 s_t = zeros(M, length(x));
@@ -138,14 +149,26 @@ for m=1:M
 end
 
 %% estimating the AETF for refrence mic (1)
-h1_est = 0 * ones(size(x_f));
+h1_est = cell(size(x_f));
+x_f_vec = create_vec(x_f, B);
+d_est_f = cell(1, M);
 for k=1:window_length
+    h1_est{k, 1} = zeros(B, 1);
+    psi_last = M*eye(B);
     for n=2:size(x_f, 2)
-        h1_est(k, n) = grad_descent_step(y_f{1}(k, n-1), x_f(k, n-1), h1_est(k, n-1));
+        [step, psi_last] = calc_step_mat(beta, x_f_vec{k, n-1}, psi_last, mu, B, epsilon);
+        h1_est{k, n} = grad_descent_step(y_f{1}(k, n-1), x_f_vec{k, n-1}, h1_est{k, n-1}, step);
     end
 end
-h1_est = conj(h1_est);
-d1_est = h1_est .* x_f;
+
+d_est_f{1} = zeros(size(x_f));
+for k=1:window_length
+    for l=1:size(x_f, 2)
+        d_est_f{1}(k, l) = h1_est{k, l}' * x_f_vec{k, l};
+    end
+end
+
+d1_est_f_vec = create_vec(d_est_f{1}, P);
 
 % figure;
 % subplot(311)
@@ -158,21 +181,22 @@ d1_est = h1_est .* x_f;
 % plot(abs(ha_f(1, :) - h1_est(:, end).'));
 % title("diffrence between real and estimation");
 
+%% estimating echo for rest of mics
+for m=2:M
+    d_est_f{m} = zeros(size(x_f));
+    for k=1:window_length
+        for l=1:size(x_f, 2)
+            d_est_f{m}(k, l) = a_hat{m, k}.' * d1_est_f_vec{k, l};
+        end
+    end
+end
+
 %% AEC - echo cancelling for each mic 
 e_f = cell(M, 1);
 u_f = cell(M, 1);
-e_f{1} = y_f{1} - d1_est;
-u_f{1} = d_f{1} - d1_est;
-d1_est_vec = create_vec(d1_est, P);
-for m=2:M
-    dm_est = zeros(size(d1_est));
-    for n=1:size(d1_est, 2)
-        for k=1:window_length
-            dm_est(k, n) = a_hat{m, k}' * d1_est_vec{k, n};
-        end
-    end
-    e_f{m} = y_f{m} - dm_est;
-    u_f{m} = d_f{m} - dm_est;
+for m=1:M
+    e_f{m} = y_f{m} - d_est_f{m};
+    u_f{m} = d_f{m} - d_est_f{m};
 end
 
 %% plotting fig 5
@@ -201,8 +225,8 @@ plot(u2_plot);
 legend("$y_2(lR)$", "$e_2(lR)$", "$u_2(lR)$", 'Interpreter', 'latex');
 hold off;
 %% calculating erle after AEC
-erle = zeros(M, length(u_t(1, :)) - R);
-for l=0:length(erle(1, :))/R-1
+erle = zeros(M, length(u_t(1, :))/R);
+for l=0:length(erle(1, :))-1
     for m=1:M
         d_vec = d_t(m, (l*R+1):(R*l+R));
         u_vec = u_t(m, (l*R+1):(R*l+R));
@@ -215,28 +239,28 @@ end
 figure;
 subplot(221)
 plot(erle(1, :));
-xlim([1, 1500]);
+%xlim([1, 1500]);
 ylabel("$erle [dB]$", 'Interpreter','latex');
 xlabel("$lR$", 'Interpreter','latex');
 grid on;
 legend("n=1", Location="northwest");
 subplot(222)
 plot(erle(2, :));
-xlim([1, 1500]);
+%xlim([1, 1500]);
 ylabel("$erle [dB]$", 'Interpreter','latex');
 xlabel("$lR$", 'Interpreter','latex');
 grid on;
 legend("n=2", Location="northwest");
 subplot(223)
 plot(erle(3, :));
-xlim([1, 1500]);
+%xlim([1, 1500]);
 ylabel("$erle [dB]$", 'Interpreter','latex');
 xlabel("$lR$", 'Interpreter','latex');
 grid on;
 legend("n=3", Location="northwest");
 subplot(224)
 plot(erle(4, :));
-xlim([1, 1500]);
+%xlim([1, 1500]);
 ylabel("$erle [dB]$", 'Interpreter','latex');
 xlabel("$lR$", 'Interpreter','latex');
 grid on;
@@ -248,7 +272,6 @@ h_mvdr = zeros(M, window_length);
 sv = zeros(M, window_length);
 for f_idx = 1:window_length
     freq = ((f_idx-1)/window_length - 0.5) * fs;
-    %sv(:, f_idx) = steering_vector(M, array_radius, doa, freq, c);
     sv(:, f_idx) = steering_vector(M, doa, freq, c, relative_pos_a);
 end
 
@@ -316,20 +339,18 @@ legend("$e_1(lR)$", "$\hat{s}_1(lR)$", "$\bar{u}(lR)$", 'Interpreter', 'latex');
 hold off;
 
 %% erle after mvdr
-residual_echo = istft(residual_echo_f, fs, "Window", window_type, "OverlapLength", overlap, ...
-   "FFTLength", window_length);
+final_erle = zeros(1, length(output)/R);
+for l=0:length(final_erle)-1
+    d_vec = d_t(1, (l*R+1):(R*l+R));
+    residual_echo_vec = residual_echo((l*R+1):(R*l+R));
+    tmp = norm(d_vec)^2 / norm(residual_echo_vec)^2;
+    final_erle(l+1) = 10*log10(tmp);
+end
 
-%final_erle = d_t(1, :).^2 ./ abs(residual_echo').^2;
-%residual_echo_lpf = filter(avg_filter, 1, abs(residual_echo).^2);
-%final_erle = d_t_lpf ./ residual_echo_lpf.';
-
-%figure;
-% subplot(211);
-% plot(abs(residual_echo));
-% subplot(212);
-plot(10*log10(final_erle));
-xlabel("l")
-ylabel("ERLE [dB]")
+figure;
+plot(final_erle);
+xlabel("$lR$", 'Interpreter', "latex")
+ylabel("$erle [dB]$", "Interpreter", "latex");
 
 %%
 e2_t = istft(e_f{2}, fs, "Window", window_type, "OverlapLength", overlap, ...
@@ -361,14 +382,6 @@ hold off;
 %% saving audio
 audiowrite('output.wav', real(output), fs);
 
-%%
-test = [1 2 3 4 5 6 7 8 9 10];
-test_vec = create_vec(test, 3);
-test_mat = create_mat(test, 3);
-for i=1:size(test_vec, 2)
-    test_vec{i}
-end
-test_mat{1}
 %% functions 
 function phi = est_cov_mat(x, window_length, M)    
     % creating cell for each frequency of X
@@ -418,12 +431,20 @@ end
 % input: y1 - the last frame input at mic 1
 %        x - the last frame loudspeaker signal
 %        h - the last estimation for the AETF
-function h_next = grad_descent_step(y1, x, h)
-    step = 1e-2; 
+function h_next = grad_descent_step(y1, x, h, step)
     % calculating error signal
-    E = y1 - conj(h)*x;
+    E = y1 - h'*x;
     % calculating next step
     h_next = h + step*x*conj(E);
+end
+
+function [M, psi] = calc_step_mat(beta, x, psi_prev, mu, b, epsilon)
+    xxH = x*x';
+    Ib = eye(b);
+    psi = beta*psi_prev + (1-beta)*(Ib .* xxH);
+    psi_reg = psi + epsilon*eye(size(psi));
+
+    M = (mu / b) * (psi_reg \ eye(size(psi)));
 end
 
 function a = steering_vector(M, doa, freq, c, rel_pos)
