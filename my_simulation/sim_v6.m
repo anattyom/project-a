@@ -1,6 +1,4 @@
 close all; clc; clear all;
-% here the talker signal is audio with change in location
-% the mvdr steering vector is far field approx (not real RTF) 
 %% parameters 
 fs = 16e3; %[Hz]
 c = 340; %[m/s]
@@ -29,20 +27,26 @@ load("C:\Users\anat\OneDrive - Technion\Notability\Project\first research simula
 estimation_length = 2; %[sec] - estimating the noise covariance matrix for both the mic and the background noise
 
 x_loudspeaker = sigma_loudspeaker * randn(1, estimation_length*fs); % for estimation loudpeaker signal is WGN
-dt_calib = zeros(M, estimation_length*fs); % signal recived at each mic
+dt_calib = zeros(M, estimation_length*fs); % loudspeaker signal recived at each mic
+st_calib = zeros(M, estimation_length*fs); % talker signal recived at each mic
 for m=1:M
     dt_calib(m, :) = filter(h_a(m, :), 1, x_loudspeaker);
+    st_calib(m, :) = filter(g_a(m, :), 1, 10*x_loudspeaker);
 end
- 
+
 vt = sigma_v * randn(M, length(dt_calib(1, :)));
 
 yt_est = dt_calib + vt; %input signal at each mic
+st_est = st_calib + vt;
 yf_est = cell(M, 1);
+sf_est = cell(M, 1);
 vf = cell(M, 1);
 for m=1:M
     yf_est{m} = stft(yt_est(m, :), fs, "Window", window_type, "OverlapLength", ...
         overlap, "FFTLength", window_length);
     vf{m} = stft(vt(m, :), fs, "Window", window_type, "OverlapLength", ...
+        overlap, "FFTLength", window_length);
+    sf_est{m} = stft(st_est(m, :), fs, "Window", window_type, "OverlapLength", ...
         overlap, "FFTLength", window_length);
 end
 
@@ -53,16 +57,6 @@ for k=1:window_length
 end
 
 %% estimating the REFT's 
-% y1_est_mat = create_mat(yf_est{1}, P);
-% a_hat = cell(M, window_length);
-% for m=2:M
-%     %ym_est = create_vec(yf_est{m}, P);
-%     for k=1:window_length
-%         a_hat{m,k} = lsqr(y1_est_mat{k}, yf_est{m}(k, :).');
-%         a_hat{m, k} = conj(a_hat{m, k});
-%     end
-% end
-
 a_hat = cell(M, window_length);
 n_tf = size(yf_est{1}, 2);
 for k=1:window_length
@@ -70,6 +64,16 @@ for k=1:window_length
     for m=1:M
         cross =  (1/n_tf) * conj(yf_est{1}(k, :)) * yf_est{m}(k, :).';
         a_hat{m, k} = cross / denom;
+    end
+end
+
+%% estimating steering vector 
+sv = zeros(M, window_length);
+for k=1:window_length
+    denom = (1/n_tf) * conj(sf_est{1}(k, :)) * sf_est{1}(k, :).';
+    for m=1:M
+        cross =  (1/n_tf) * conj(sf_est{1}(k, :)) * sf_est{m}(k, :).';
+        sv(m, k) = cross / denom; 
     end
 end
 % real time stage 
@@ -268,13 +272,6 @@ legend("n=4", Location="northwest");
 %% using MVDR beamformer
 h_mvdr = zeros(M, window_length);
 
-% creating steering vector 
-sv = zeros(M, window_length);
-for f_idx = 1:window_length
-    freq = ((f_idx-1)/window_length - 0.5) * fs;
-    sv(:, f_idx) = steering_vector(M, doa, freq, c, relative_pos_a);
-end
-
 for f_idx=1:window_length
     denominator = sv(:, f_idx)' * phi_noise_inv{f_idx} * sv(:, f_idx);
     numerator = phi_noise_inv{f_idx} * sv(:, f_idx);
@@ -445,17 +442,4 @@ function [M, psi] = calc_step_mat(beta, x, psi_prev, mu, b, epsilon)
     psi_reg = psi + epsilon*eye(size(psi));
 
     M = (mu / b) * (psi_reg \ eye(size(psi)));
-end
-
-function a = steering_vector(M, doa, freq, c, rel_pos)
-    phi_rad = deg2rad(doa(1));
-    theta_rad = deg2rad(doa(2));
-    d_hat = [cos(theta_rad)*cos(phi_rad); 
-        cos(theta_rad)*sin(phi_rad); 
-        sin(theta_rad)];
-    lambda = c / freq;
-    k = 2 * pi / lambda;
-    phase_delay = k * (rel_pos(2:end, :) * d_hat);
-    a = ones(M, 1);
-    a(2:end) = exp(-1j*phase_delay);
 end
